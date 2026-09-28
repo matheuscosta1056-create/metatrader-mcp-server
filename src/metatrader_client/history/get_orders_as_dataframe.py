@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from .get_orders import get_orders
 from ..exceptions import OrdersHistoryError
+from ..utils import server_time_to_local
 
 logger = logging.getLogger("MT5History")
 
@@ -23,7 +24,8 @@ def get_orders_as_dataframe(
         df = pd.DataFrame(orders)
         for col in ['time_setup', 'time_done', 'time_expiration']:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], unit='s')
+                # 0 means "not set" (e.g. no expiration)
+                df[col] = server_time_to_local(df[col].where(df[col] > 0))
         if 'time_setup' in df.columns:
             df.set_index('time_setup', inplace=True)
         logger.debug(f"Created DataFrame with {len(df)} orders.")

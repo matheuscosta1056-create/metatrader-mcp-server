@@ -4,6 +4,7 @@ import pandas as pd
 import logging
 from .get_deals import get_deals
 from ..exceptions import DealsHistoryError
+from ..utils import server_time_to_local
 
 logger = logging.getLogger("MT5History")
 
@@ -24,7 +25,7 @@ def get_deals_as_dataframe(
             return pd.DataFrame()
         df = pd.DataFrame(deals)
         if 'time' in df.columns:
-            df['time'] = pd.to_datetime(df['time'], unit='s')
+            df['time'] = server_time_to_local(df['time'])
             df.set_index('time', inplace=True)
         logger.debug(f"Created DataFrame with {len(df)} deals.")
         return df

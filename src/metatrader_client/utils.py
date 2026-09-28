@@ -7,10 +7,53 @@ Utility functions for MetaTrader MCP Server.
 This module provides helper functions for common operations.
 """
 
+import os
+import numpy as np
 import pandas as pd
 import pytz
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union, Tuple
+
+
+# Timezone of the broker's trade server. B3 brokers run on Brasília time.
+# Override with the MT5_SERVER_TIMEZONE environment variable if needed.
+DEFAULT_SERVER_TIMEZONE = "America/Sao_Paulo"
+
+
+def get_server_timezone() -> str:
+    return os.getenv("MT5_SERVER_TIMEZONE") or DEFAULT_SERVER_TIMEZONE
+
+
+def server_time_to_local(value: Any, unit: str = "s") -> Any:
+    """
+    Convert MT5 timestamps to timezone-aware datetimes in the server timezone.
+
+    MT5 returns times as seconds since epoch, but they encode the trade
+    server's wall-clock time, not UTC. A position opened at 12:27 in
+    Brasília comes back as the epoch value of 12:27 UTC. The correct
+    conversion is therefore to read the value as a naive wall-clock time and
+    attach the server timezone, never to convert from UTC.
+
+    This is the single place where MT5 times are converted. It accepts a
+    pandas Series or a scalar and returns the same kind.
+    """
+    tz = get_server_timezone()
+
+    if isinstance(value, pd.Series):
+        if value.empty:
+            return value
+        naive = pd.to_datetime(value, unit=unit)
+        return naive.dt.tz_localize(
+            tz,
+            ambiguous=np.zeros(len(naive), dtype=bool),
+            nonexistent="shift_forward",
+        )
+
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    return pd.Timestamp(int(value), unit=unit).tz_localize(
+        tz, ambiguous=False, nonexistent="shift_forward"
+    )
 
 
 def convert_positions_to_dataframe(
@@ -78,15 +121,12 @@ def convert_positions_to_dataframe(
     
     # Convert time from MT5 time integer to DataFrame suitable time format
     if 'time' in result.columns and result['time'].notna().any():
-        # Convert to datetime from Unix timestamp (seconds)
-        result['time'] = pd.to_datetime(result['time'], unit='s')
-        
-        # Convert from UTC to local timezone
-        # Get the local timezone
-        local_tz = datetime.now().astimezone().tzinfo
-        
-        # Convert UTC time to local timezone
-        result['time'] = result['time'].dt.tz_localize('UTC').dt.tz_convert(local_tz)
+        result['time'] = server_time_to_local(result['time'])
+
+    # Pending orders carry an expiration time (0 means no expiration)
+    if 'expiration' in result.columns and result['expiration'].notna().any():
+        expiration = result['expiration']
+        result['expiration'] = server_time_to_local(expiration.where(expiration > 0))
     
     # Sort the DataFrame if sort_by is provided
     if sort_by is not None and sort_by in result.columns:
