@@ -1,5 +1,6 @@
 from .get_pending_orders_by_symbol import get_pending_orders_by_symbol
 from .cancel_pending_order import cancel_pending_order
+from ._batch import run_batch
 
 def cancel_pending_orders_by_symbol(connection, symbol: str):
     """
@@ -14,8 +15,4 @@ def cancel_pending_orders_by_symbol(connection, symbol: str):
         successful.
     """
     pending_orders = get_pending_orders_by_symbol(connection, symbol)
-    cancel_count = 0
-    for id in pending_orders["id"]:
-        cancel_pending_order(connection, id)
-        cancel_count += 1
-    return { "error": False, "message": f"Cancel {cancel_count} pending orders success", "data": None }
+    return run_batch(pending_orders["id"], lambda id: cancel_pending_order(connection, id), f"Cancel {symbol} pending orders")

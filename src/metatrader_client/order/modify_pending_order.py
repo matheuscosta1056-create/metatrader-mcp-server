@@ -39,19 +39,15 @@ def modify_pending_order(
         "action": TradeRequestActions.MODIFY,
         "order": order_id,
         "price": price,
-        "stop_loss": stop_loss,
-        "take_profit": take_profit,
+        # Keep the current SL/TP when not given, otherwise they would be removed
+        "stop_loss": stop_loss if stop_loss is not None else float(order["stop_loss"]),
+        "take_profit": take_profit if take_profit is not None else float(order["take_profit"]),
     }
-
-    if stop_loss is None:
-        del request["stop_loss"]
-    if take_profit is None:
-        del request["take_profit"]
 
     response = send_order(connection, **request)
 
     if response["success"] is False:
-        return { "error": True, "message": response["message"], "data": None }
+        return { "error": True, "message": f"Modify pending order {order_id} failed: {response['message']}", "data": None }
 
     data = response["data"]
     return {

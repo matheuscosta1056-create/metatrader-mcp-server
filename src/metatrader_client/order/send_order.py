@@ -21,6 +21,46 @@ from ..types import (
 )
 
 
+# Return codes that mean the trade server accepted the request.
+TRADE_RETCODE_PLACED = 10008  # pending order placed
+TRADE_RETCODE_DONE = 10009    # request completed
+
+
+def check_trade_result(result, accepted_retcodes=(TRADE_RETCODE_DONE,)) -> Dict:
+	"""
+	Turn the result of ``mt5.order_send`` into a success/failure response.
+
+	The request only succeeded when the server answered with one of
+	``accepted_retcodes``. ``mt5.last_error()`` alone is not enough: a request
+	rejected by the broker (e.g. retcode 10013, Invalid request) still leaves
+	``last_error`` clean.
+	"""
+	if result is None:
+		error_code, error_description = mt5.last_error()
+		return {
+			"success": False,
+			"message": f"order_send returned no result. last_error: ({error_code}, {error_description})",
+			"data": None,
+			"retcode": None,
+		}
+
+	if result.retcode not in accepted_retcodes:
+		error_code, error_description = mt5.last_error()
+		return {
+			"success": False,
+			"message": f"Request rejected: retcode {result.retcode} ({result.comment}). last_error: ({error_code}, {error_description})",
+			"data": result,
+			"retcode": result.retcode,
+		}
+
+	return {
+		"success": True,
+		"message": f"Request done: retcode {result.retcode} ({result.comment})",
+		"data": result,
+		"retcode": result.retcode,
+	}
+
+
 def send_order(
 	connection,
 	*,
@@ -94,7 +134,7 @@ def send_order(
 	# Validate symbol
 	if symbol is not None:
 		if (len(_market.get_symbols(symbol)) == 0):
-			return { "success": False, "message": "Invalid symbol" }
+			return { "success": False, "message": "Invalid symbol", "data": None }
 		# Ensure symbol is available
 		if not mt5.symbol_select(symbol, True):
 			return { "success": False, "message": f"Failed to select {symbol}", "data": None }
@@ -195,13 +235,7 @@ def send_order(
 				pass
 			
 			response = mt5.order_send(request)
-
-			error_code, error_description = mt5.last_error()
-			
-			if error_code < 0:
-				return { "success": False, "message": f"Error {error_code}: {error_description}", "data": None }
-
-			return { "success": True, "message": "Order sent successfully", "data": response }
+			return check_trade_result(response)
 
 		# ----------------------------------------------------------
 		# Pending order (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP)
@@ -243,11 +277,7 @@ def send_order(
 			}
 
 			response = mt5.order_send(request)
-
-			error_code, error_description = mt5.last_error()
-			if error_code < 0:
-				return { "success": False, "message": f"Error {error_code}: {error_description}", "data": None }
-			return { "success": True, "message": "Order sent successfully", "data": response }
+			return check_trade_result(response, (TRADE_RETCODE_DONE, TRADE_RETCODE_PLACED))
 
 		# --------------------
 		# Modify order (SL/TP)
@@ -261,8 +291,16 @@ def send_order(
 					"data": None,
 				}
 
+			if not symbol:
+				return {
+					"success": False,
+					"message": f"Parameter `symbol` is required for this operation",
+					"data": None,
+				}
+
 			request = {
 				"action": action,
+				"symbol": symbol,
 				"position": position,
 				"sl": stop_loss,
 				"tp": take_profit,
@@ -270,11 +308,7 @@ def send_order(
 			}
 
 			response = mt5.order_send(request)
-
-			error_code, error_description = mt5.last_error()
-			if error_code < 0:
-				return { "success": False, "message": f"Error {error_code}: {error_description}", "data": None }
-			return { "success": True, "message": "Order sent successfully", "data": response }
+			return check_trade_result(response)
 			
 		# ------------
 		# Modify order
@@ -303,12 +337,8 @@ def send_order(
 			if take_profit is None:
 				del request["tp"]
 
-			mt5.order_send(request)
-
-			error_code, error_description = mt5.last_error()
-			if error_code < 0:
-				return { "success": False, "message": f"Error {error_code}: {error_description}", "data": None }
-			return { "success": True, "message": "Order sent successfully", "data": None }
+			response = mt5.order_send(request)
+			return check_trade_result(response, (TRADE_RETCODE_DONE, TRADE_RETCODE_PLACED))
 
 		#----------------------
 		#  Remove pending order
@@ -328,22 +358,12 @@ def send_order(
 			}
 
 			response = mt5.order_send(request)
-
-			error_code, error_description = mt5.last_error()
-			if error_code < 0:
-				return { "success": False, "message": f"Error {error_code}: {error_description}", "data": None }
-			return { "success": True, "message": "Order sent successfully", "data": response }
+			return check_trade_result(response, (TRADE_RETCODE_DONE, TRADE_RETCODE_PLACED))
 
 		# --------
 		# Close by
 		# --------   
 		case TradeRequestActions.CLOSE_BY:
-			print("CLOSE BY")
+			return { "success": False, "message": "CLOSE_BY is not supported", "data": None }
 
-	return {
-		'success': False,
-		'return_code': -1,
-		'return_message': 'Unknown error',
-		'request': None,
-		'result': None
-	}
+	return { "success": False, "message": f"Unsupported action {action}", "data": None }
